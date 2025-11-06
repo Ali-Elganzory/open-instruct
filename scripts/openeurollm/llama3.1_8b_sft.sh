@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=llama3.1_8b_sft
-#SBATCH --output=slurm_logs/%j.%x.%N.out
-#SBATCH --error=slurm_logs/%j.%x.%N.err
-#SBATCH --time=02-00:00:00
+#SBATCH --job-name=llama3.1_8b_sft__123
+#SBATCH --output=slurm_logs/llama3.1_8b_sft__123/%j.%x.%N.out
+#SBATCH --error=slurm_logs/llama3.1_8b_sft__123/%j.%x.%N.err
+#SBATCH --time=00-01:00:00
 #SBATCH --partition=accelerated-h100
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -19,15 +19,21 @@ fi
 # Activate the env
 source .venv/bin/activate
 
-# modify the following `MACHINE_RANK`, `MAIN_PROCESS_IP`,
-# `NUM_MACHINES`, `NUM_PROCESSES`, `PER_DEVICE_TRAIN_BATCH_SIZE`,
-# `GRADIENT_ACCUMULATION_STEPS` according to your setup
+# modify the following variables according to your setup
+SEED=123
+TIMESTAMP=$(date +%s)
+# EXP_NAME=llama3.1_8b_sft__$SEED__$TIMESTAMP
+EXP_NAME=llama3.1_8b_sft__1760768879
 MACHINE_RANK=0
 MAIN_PROCESS_IP=localhost
 NUM_MACHINES=1
 NUM_PROCESSES=4
 PER_DEVICE_TRAIN_BATCH_SIZE=1
 GRADIENT_ACCUMULATION_STEPS=32
+CHECKPOINTING_STEPS=200
+PUSH_TO_HUB=False
+DO_NOT_RANDOMIZE_OUTPUT_DIR=True
+ADD_SEED_AND_DATE_TO_EXP_NAME=False
 srun accelerate launch \
     --mixed_precision bf16 \
     --num_machines $NUM_MACHINES \
@@ -50,10 +56,9 @@ srun accelerate launch \
     --warmup_ratio 0.03 \
     --weight_decay 0.0 \
     --num_train_epochs 2 \
-    --use_lora True \
-    --lora_rank 64 \
-    --lora_alpha 16 \
-    --output_dir output/llama3.1_8b_sft \
+    --output_dir output/$EXP_NAME \
+    --do_not_randomize_output_dir $DO_NOT_RANDOMIZE_OUTPUT_DIR \
+    --add_seed_and_date_to_exp_name $ADD_SEED_AND_DATE_TO_EXP_NAME \
     --with_tracking \
     --report_to wandb \
     --wandb_project_name "openeurollm" \
@@ -62,11 +67,17 @@ srun accelerate launch \
     --model_revision main \
     --dataset_mixer_list allenai/tulu-3-sft-mixture 1.0 \
     --chat_template_name tulu \
-    --checkpointing_steps 1000 \
-    --keep_last_n_checkpoints -1 \
+    --checkpointing_steps $CHECKPOINTING_STEPS \
+    --keep_last_n_checkpoints 1 \
+    --clean_checkpoints_at_end False \
     --save_to_hub False \
-    --dataset_mix_dir output/llama3.1_8b_sft \
-    --exp_name llama3.1_8b_sft \
+    --push_to_hub $PUSH_TO_HUB \
+    --try_launch_beaker_eval_jobs False \
+    --dataset_mix_dir output/$EXP_NAME \
+    --exp_name $EXP_NAME \
     --verbose True \
-    --seed 123
+    --seed $SEED
+    # --use_lora True \
+    # --lora_rank 64 \
+    # --lora_alpha 16 \
     # --cache_dataset_only True \
