@@ -41,6 +41,8 @@ from typing import List, Literal, Optional, Union
 import datasets
 import torch
 import transformers
+from deepspeed.runtime.zero.config import ZeroStageEnum
+from deepspeed.runtime.fp16.loss_scaler import LossScaler
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.accelerator import GradientAccumulationPlugin
 from accelerate.logging import get_logger
@@ -50,7 +52,13 @@ from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_tr
 from rich.pretty import pprint
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
-from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, DataCollatorForSeq2Seq, get_scheduler
+from transformers import (
+    AutoConfig,
+    AutoModelForCausalLM,
+    BitsAndBytesConfig,
+    DataCollatorForSeq2Seq,
+    get_scheduler,
+)
 from transformers.training_args import _convert_str_dict
 
 from open_instruct import logger_utils, utils
@@ -76,6 +84,10 @@ from open_instruct.utils import (
 )
 
 logger = get_logger(__name__)
+
+# Workaround for 2.6+ torch versions
+# Loading deepspeed checkpoints with weights_only=False
+torch.serialization.add_safe_globals([ZeroStageEnum, LossScaler])
 
 
 @dataclass
@@ -271,6 +283,9 @@ class FlatArguments:
     )
     keep_last_n_checkpoints: int = field(
         default=3, metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."}
+    )
+    save_model_with_checkpoints: bool = field(
+        default=True, metadata={"help": "Whether to save the model with checkpoints."}
     )
     fused_optimizer: bool = field(default=True, metadata={"help": "Whether to use fused AdamW or not."})
     load_balancing_loss: bool = field(
@@ -900,6 +915,15 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         if args.output_dir is not None:
                             output_dir = os.path.join(args.output_dir, output_dir)
                         accelerator.save_state(output_dir)
+                        
+                        if args.save_model_with_checkpoints:
+                            output_dir = f"model_{completed_steps}"
+                            if args.output_dir is not None:
+                                output_dir = os.path.join(args.output_dir, output_dir)
+                            save_with_accelerate(
+                                accelerator, model, tokenizer, output_dir, args.use_lora, chat_template_name=tc.chat_template_name
+                            )
+
                         # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
                         with open(
                             os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w"
